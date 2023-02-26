@@ -2,7 +2,7 @@
 
 **A minimal Python library for creating config classes: a data class that can load defaults from other sources.**
 
-- Dead easy API: stack a `@configclass` decorator on any class with dataclass-like initialization semantics, such as standard library dataclasses, a Pydantic `BaseModel`, or even NamedTuples and SimpleNamespaces.
+- Dead easy API: stack a `@configclass` decorator on any class with dataclass-like initialization semantics, such as standard library [dataclasses](https://docs.python.org/3/library/dataclasses.html), a [Pydantic `BaseModel`](https://docs.pydantic.dev/usage/models/), or [attrs classes](https://www.attrs.org/en/stable/overview.html).
 - A sane out-of-the-box implemention `@simple_configclass` that merges values from environment variables, `pyproject.toml` files, and TOML config files in conventional locations.
 - Simple and straightforward extensibility: write loader functions that load source data into dictionaries and resolver functions that resolve multiple dictionaries into one.
 - Zero dependencies for 3.11 or higher, and only standard library backports for lower Python versions.
