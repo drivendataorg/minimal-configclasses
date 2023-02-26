@@ -9,11 +9,16 @@ from typing import (
     Dict,
     Iterable,
     Iterator,
+    Mapping,
     Optional,
     Sequence,
     Tuple,
-    TypeGuard,
 )
+
+try:
+    from typing import TypeGuard  # type: ignore[attr-defined]
+except ImportError:
+    from typing_extensions import TypeGuard
 
 try:
     import tomllib
@@ -28,7 +33,7 @@ def is_dict_with_str_keys(d: Any) -> TypeGuard[Dict[str, Any]]:
 @dataclass
 class TomlFileLoader:
     name: str
-
+    convert_hyphens: True
     check_pyproject_toml: bool = True
     file_name_templates: Iterable[str] = ("{name}.toml", ".{name}.toml")
     recursive_search = True
@@ -37,7 +42,7 @@ class TomlFileLoader:
     check_xdg_config_home_dir: bool = True
 
     @property
-    def file_names(self) -> Iterator[Path]:
+    def file_names(self) -> Iterator[str]:
         for template in self.file_name_templates:
             yield template.format(name=self.name)
 
@@ -78,10 +83,13 @@ class TomlFileLoader:
         else:
             return data
 
-    def __call__(self) -> Iterator[Tuple[Dict[str], Any], dict]:
-        for path in self.candidates(self.name):
+    def __call__(self) -> Iterator[Tuple[Dict[str, Any], dict]]:
+        for path in self.paths_to_check:
             try:
-                yield (self.load(path), {"load": self, "path": path})
+                data = self.load(path)
+                if self.convert_hyphens:
+                    data = {key.replace("-", "_"): value for key, value in data.items()}
+                yield (data, {"loader": self, "path": path})
             except FileNotFoundError:
                 pass
             except KeyError as e:
@@ -103,13 +111,13 @@ class ConfigEnvVarLoader:
     def __call__(self) -> Iterator[Tuple[Dict[str, Any], dict]]:
         yield {
             self.env_var_to_field_name(key): value
-            for key, value in os.environ.item()
+            for key, value in os.environ.items()
             if key.startswith(self.prefix)
         }, {"loader": self}
 
 
 class FirstOnlyResolver:
-    def __call__(self, sources: Iterator[Tuple[Dict[str], Any], dict]) -> dict:
+    def __call__(self, sources: Iterator[Tuple[Dict[str, Any], dict]]) -> dict:
         return next(sources)[0]
 
 
@@ -117,7 +125,7 @@ class FirstOnlyResolver:
 class MergeResolver:
     n: Optional[int] = None
 
-    def resolve(self, sources: Iterator[Tuple[Dict[str], Any], dict]) -> dict:
+    def __call__(self, sources: Iterator[Tuple[Dict[str, Any], dict]]) -> Mapping[str, Any]:
         if self.n is None:
             return ChainMap(*(item[0] for item in sources))
         else:
@@ -135,11 +143,11 @@ def simple_configclass(name: str) -> Callable[[type], type]:
 
 
 def configclass(
-    loaders: Sequence[Callable[[], Tuple[Dict[str], dict]]],
-    resolver: Callable[[Iterator[Tuple[Dict[str], Any], dict]], dict],
+    loaders: Sequence[Callable[[], Iterator[Tuple[Dict[str, Any], dict]]]],
+    resolver: Callable[[Iterator[Tuple[Dict[str, Any], dict]]], Mapping[str, Any]],
 ) -> Callable[[type], type]:
-    @classmethod
-    def resolve_sources(cls):
+    @classmethod  # type: ignore[misc]
+    def resolve_sources(cls) -> Mapping:
         file_data = chain(*(loader() for loader in loaders))
         return resolver(file_data)
 
