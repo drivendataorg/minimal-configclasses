@@ -3,7 +3,7 @@ requires = ["flit_core >=3.2,<4"]
 build-backend = "flit_core.buildapi"
 
 [project]
-name = "minimal_configclasses"
+name = "minimal-configclasses"
 version = "1.0.0"
 description = "Minimal library for turning a data class into a config class with TOML config file and environment variable resolution."
 readme = "README.md"
@@ -45,12 +45,12 @@ select = [
     "F", # Pycodestyle
     "I", # isort
 ]
-src = ["pyproject-config", "tests"]
+src = ["minimal_configclasses", "tests"]
 exclude = ["tests/assets"]
 unfixable = ["F"]
 
 [tool.ruff.isort]
-known-first-party = ["pyproject-config"]
+known-first-party = ["minimal_configclasses"]
 force-sort-within-sections = true
 
 [tool.mypy]
@@ -58,11 +58,11 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = "--cov=pyproject-config --cov-report=term --cov-report=html --cov-report=xml"
+addopts = "--cov=minimal_configclasses --cov-report=term --cov-report=html --cov-report=xml"
 testpaths = ["tests"]
 
 [tool.coverage.run]
-source = ["pyproject-config"]
+source = ["minimal_configclasses"]
 
 [tool.jay]
 foo = "bar"
