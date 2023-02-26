@@ -1,5 +1,5 @@
 from collections import ChainMap
-from dataclasses import dataclass
+import dataclasses
 from itertools import chain, islice
 import os
 from pathlib import Path
@@ -13,12 +13,19 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
+    get_type_hints,
 )
 
 try:
     from typing import TypeGuard  # type: ignore[attr-defined]
 except ImportError:
     from typing_extensions import TypeGuard
+
+try:
+    from typing import get_origin
+except ImportError:
+    from typing_extensions import get_origin
+
 
 try:
     import tomllib
@@ -30,10 +37,10 @@ def is_dict_with_str_keys(d: Any) -> TypeGuard[Dict[str, Any]]:
     return isinstance(d, dict) and all(isinstance(k, str) for k in d)
 
 
-@dataclass
+@dataclasses.dataclass
 class TomlFileLoader:
     name: str
-    convert_hyphens: True
+    convert_hyphens: bool = True
     check_pyproject_toml: bool = True
     file_name_templates: Iterable[str] = ("{name}.toml", ".{name}.toml")
     recursive_search = True
@@ -83,7 +90,7 @@ class TomlFileLoader:
         else:
             return data
 
-    def __call__(self) -> Iterator[Tuple[Dict[str, Any], dict]]:
+    def __call__(self, data_class: type) -> Iterator[Tuple[Dict[str, Any], dict]]:
         for path in self.paths_to_check:
             try:
                 data = self.load(path)
@@ -97,9 +104,10 @@ class TomlFileLoader:
                     raise
 
 
-@dataclass
+@dataclasses.dataclass
 class ConfigEnvVarLoader:
     name: str
+    convert_types: bool = True
 
     @property
     def prefix(self):
@@ -108,24 +116,55 @@ class ConfigEnvVarLoader:
     def env_var_to_field_name(self, env_var: str):
         return env_var[len(self.prefix) :].lower()
 
-    def __call__(self) -> Iterator[Tuple[Dict[str, Any], dict]]:
-        yield {
+    def convert_env_var_to_type(self, val: str, field_type):
+        if field_type in {int, float, complex}:
+            return field_type(val)
+        elif field_type is bytes:
+            return val.encode("utf-8")
+        elif field_type is bool:
+            if val.lower() == "true":
+                return True
+            elif val.lower() == "false":
+                return False
+            else:
+                raise ValueError("Unable to convert bool value:", val)
+        elif get_origin(field_type) in {list, tuple, dict}:
+            return get_origin(field_type)(  # type: ignore[misc]
+                tomllib.loads(f"val = {val}")["val"]
+            )
+        return val
+
+    def __call__(self, data_class: type) -> Iterator[Tuple[Dict[str, Any], dict]]:
+        data = {
             self.env_var_to_field_name(key): value
             for key, value in os.environ.items()
             if key.startswith(self.prefix)
-        }, {"loader": self}
+        }
+        if self.convert_types:
+            if dataclasses.is_dataclass(data_class):
+                field_type_hints = get_type_hints(data_class)
+                data = {
+                    key: self.convert_env_var_to_type(value, field_type_hints[key])
+                    for key, value in data.items()
+                }
+            else:
+                # Not a dataclass
+                pass
+        yield data, {"loader": self}
 
 
 class FirstOnlyResolver:
-    def __call__(self, sources: Iterator[Tuple[Dict[str, Any], dict]]) -> dict:
+    def __call__(self, sources: Iterator[Tuple[Dict[str, Any], dict]], data_class: type) -> dict:
         return next(sources)[0]
 
 
-@dataclass
+@dataclasses.dataclass
 class MergeResolver:
     n: Optional[int] = None
 
-    def __call__(self, sources: Iterator[Tuple[Dict[str, Any], dict]]) -> Mapping[str, Any]:
+    def __call__(
+        self, sources: Iterator[Tuple[Dict[str, Any], dict]], data_class: type
+    ) -> Mapping[str, Any]:
         if self.n is None:
             return ChainMap(*(item[0] for item in sources))
         else:
@@ -135,21 +174,21 @@ class MergeResolver:
 def simple_configclass(name: str) -> Callable[[type], type]:
     return configclass(
         loaders=[
-            ConfigEnvVarLoader("name"),
-            TomlFileLoader("name"),
+            ConfigEnvVarLoader(name),
+            TomlFileLoader(name),
         ],
         resolver=MergeResolver(),
     )
 
 
 def configclass(
-    loaders: Sequence[Callable[[], Iterator[Tuple[Dict[str, Any], dict]]]],
-    resolver: Callable[[Iterator[Tuple[Dict[str, Any], dict]]], Mapping[str, Any]],
+    loaders: Sequence[Callable[[type], Iterator[Tuple[Dict[str, Any], dict]]]],
+    resolver: Callable[[Iterator[Tuple[Dict[str, Any], dict]], type], Mapping[str, Any]],
 ) -> Callable[[type], type]:
     @classmethod  # type: ignore[misc]
     def resolve_sources(cls) -> Mapping:
-        file_data = chain(*(loader() for loader in loaders))
-        return resolver(file_data)
+        file_data = chain(*(loader(cls) for loader in loaders))
+        return resolver(file_data, cls)
 
     def decorator(cls):
         cls.resolve_sources = resolve_sources
