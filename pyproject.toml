@@ -4,7 +4,7 @@ build-backend = "flit_core.buildapi"
 
 [project]
 name = "minimal-configclasses"
-version = "1.0.0"
+version = "0.1.0"
 description = "Minimal library for turning a data class into a config class with TOML config file and environment variable resolution."
 readme = "README.md"
 authors = [{ name = "Jay Qi", email = "jayqi.opensource@gmail.com" }]

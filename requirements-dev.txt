@@ -1,0 +1,5 @@
+attr
+coverage
+pydantic
+pytest
+pytest-cov
