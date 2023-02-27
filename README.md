@@ -33,21 +33,64 @@ config
 # > MyExampleConfig(var_a=9001, var_b=False, var_c='custom')
 ```
 
-## simple_configclass
+## @simple_configclass: Out-of-the-box functionality
 
-...
+The `@simple_configclass` decorator provides easy-to-use out-of-the-box functionality. The only required argument is a `name` string that will be used when searching for configuration data:
+
+- Checking for environment variables prefixed by `{name.upper()}_`
+- Checking for the `[tool.{name}]` table in any found `project.toml` files
+- Checking for files named `{name}.toml` or `.{name}.toml`
+
+If you need additional configurability, check out the general API with the `@configclass` decorator in the next section.
+
+## @configclass: More customizability
+
+The `@configclass` decorator is the general API for setting up a config class. It takes a sequence (e.g., list or tuple) of "loaders" that find and read configuration data, as well as a "resolver" which combines all of the loaded configuration data into one set of values.
+
+minimal-configclasses provides a few built-in loaders and resolvers that you can use. In fact, `@simple_configclass` is just a wrapper around `@configclass` using built-in loaders and a resolver. It is equivalent to:
+
+```python
+@configclass(
+    loaders=[EnvVarLoader(name), TomlFileLoader(name)],
+    resolver=MergeResolver(),
+)
+```
+
+The built-in loaders have additional parameters you can set when initializing them to modify their behavior—take a look at their documentation to see all of the options.
 
 ## Supplying your own loaders and resolvers
 
-...
+If the built-in loaders or resolvers don't meet your needs, you can easily write your own. Loaders and resolvers simply need to be callables that match required argument and return signatures. While the built-in implementations from minimal-configclasses are implemented as classes, valid loaders and resolvers don't need to be classes in general—you can simply write functions. Classes are only necessarily if you want parameterize their behavior for reuse them in different situations.
 
 ### Custom loaders
 
-...
+A loader is a callable that returns an iterator of tuples of configuration data and metadata. The simplest version of this would be a generator function. A template for such a generator function is shown below:
+
+```python
+def my_loader(data_class: type) -> Iterator[Tuple[Mapping[str, Any], Mapping]]:
+    data = ...
+    metadata = ...
+    yield data, metadata
+```
+
+The configuration data and metadata should both be mappings (i.e., dictionary or dictionary-like objects). The first item in the tuple—"data"—is the configuration values read from a source. The second item—"metadata"—is a container for arbitrary metadata that you would like to pass along. This lets you define behavior later in the resolver based on information coming from the loader.
+
+Loaders will called with the config data class as an argument, so that you may use metadata on the data class inside your loader. For example, the built-in `EnvVarLoader` gets the field types from data class' type annotations and attempts to convert the values loaded from environment variables to those types.
+
+The `@configclass` decorator is able to take multiple loaders. It will call each loader in sequence and the full stream of loaded `(data, metadata)` tuples will be passed to the resolver.
 
 ### Custom resolvers
 
-...
+A resolver is a callable that takes all `(data, metadata)` tuples from the loaders and resolves everything into a single configuration data mapping (i.e., dictionary or dictionary-like object) that will be passed to data class initialization. A minimal function template is shown below:
+
+```python
+def my_resolver(
+        sources: Iterator[Tuple[Mapping[str, Any], Mapping]], data_class: type
+    ) -> Mapping[str, Any]:
+    ...
+```
+
+Like the loaders, the resolver is passed the config data class as an argument. This allows you to define behavior that depends information from the data class definition.
 
 ## Limitations and Design Trade-offs
 
