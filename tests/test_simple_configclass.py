@@ -1,8 +1,6 @@
-from collections import namedtuple
 import dataclasses
 import os
 from pathlib import Path
-from types import SimpleNamespace
 
 import attrs
 import pydantic
@@ -10,7 +8,6 @@ import pytest
 import tomli_w
 
 from minimal_configclasses import simple_configclass
-
 
 TOOL_NAME = "testtool"
 
