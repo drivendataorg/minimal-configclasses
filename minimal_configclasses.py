@@ -1,4 +1,4 @@
-from collections import ChainMap
+import collections.abc
 import dataclasses
 from itertools import chain, islice
 import os
@@ -7,12 +7,15 @@ from typing import (
     Any,
     Callable,
     Dict,
+    Generic,
     Iterable,
     Iterator,
+    List,
     Mapping,
     Optional,
     Sequence,
     Tuple,
+    TypeVar,
     get_type_hints,
 )
 
@@ -90,7 +93,7 @@ class TomlFileLoader:
         else:
             return data
 
-    def __call__(self, data_class: type) -> Iterator[Tuple[Dict[str, Any], dict]]:
+    def __call__(self, data_class: type) -> Iterator[Tuple[Mapping[str, Mapping], Mapping]]:
         for path in self.paths_to_check:
             try:
                 data = self.load(path)
@@ -105,7 +108,7 @@ class TomlFileLoader:
 
 
 @dataclasses.dataclass
-class ConfigEnvVarLoader:
+class EnvVarLoader:
     name: str
     convert_types: bool = True
 
@@ -134,7 +137,7 @@ class ConfigEnvVarLoader:
             )
         return val
 
-    def __call__(self, data_class: type) -> Iterator[Tuple[Dict[str, Any], dict]]:
+    def __call__(self, data_class: type) -> Iterator[Tuple[Mapping[str, Any], Mapping]]:
         data = {
             self.env_var_to_field_name(key): value
             for key, value in os.environ.items()
@@ -154,8 +157,39 @@ class ConfigEnvVarLoader:
 
 
 class FirstOnlyResolver:
-    def __call__(self, sources: Iterator[Tuple[Dict[str, Any], dict]], data_class: type) -> dict:
+    def __call__(
+        self, sources: Iterator[Tuple[Mapping[str, Any], Mapping]], data_class: type
+    ) -> Mapping:
         return next(sources)[0]
+
+
+_KT = TypeVar("_KT")
+_VT = TypeVar("_VT")
+
+
+class ReadOnlyChainMap(collections.abc.Mapping, Generic[_KT, _VT]):
+    """A read-only ChainMap implementation. Combines multiple mappings for sequential lookup.
+    Adapted from collections.ChainMap implementation https://github.com/python/cpython."""
+
+    def __init__(self, *maps: Mapping[_KT, _VT]):
+        self.maps: List[Mapping[_KT, _VT]] = list(maps) or [{}]  # always at least one map
+
+    def __getitem__(self, key: _KT) -> _VT:
+        for mapping in self.maps:
+            try:
+                return mapping[key]  # can't use 'key in mapping' with defaultdict
+            except KeyError:
+                pass
+        raise KeyError(key)
+
+    def __len__(self) -> int:
+        return len(set().union(*self.maps))  # reuses stored hash values if possible
+
+    def __iter__(self) -> Iterator[_KT]:
+        d = {}  # type: ignore[var-annotated]
+        for mapping in map(dict.fromkeys, reversed(self.maps)):  # type: ignore[arg-type]
+            d |= mapping  # reuses stored hash values if possible
+        return iter(d)
 
 
 @dataclasses.dataclass
@@ -163,18 +197,18 @@ class MergeResolver:
     n: Optional[int] = None
 
     def __call__(
-        self, sources: Iterator[Tuple[Dict[str, Any], dict]], data_class: type
+        self, sources: Iterator[Tuple[Mapping[str, Any], Mapping]], data_class: type
     ) -> Mapping[str, Any]:
         if self.n is None:
-            return ChainMap(*(item[0] for item in sources))
+            return ReadOnlyChainMap(*(item[0] for item in sources))
         else:
-            return ChainMap(*(item[0] for item in islice(sources, self.n)))
+            return ReadOnlyChainMap(*(item[0] for item in islice(sources, self.n)))
 
 
 def simple_configclass(name: str) -> Callable[[type], type]:
     return configclass(
         loaders=[
-            ConfigEnvVarLoader(name),
+            EnvVarLoader(name),
             TomlFileLoader(name),
         ],
         resolver=MergeResolver(),
@@ -182,8 +216,8 @@ def simple_configclass(name: str) -> Callable[[type], type]:
 
 
 def configclass(
-    loaders: Sequence[Callable[[type], Iterator[Tuple[Dict[str, Any], dict]]]],
-    resolver: Callable[[Iterator[Tuple[Dict[str, Any], dict]], type], Mapping[str, Any]],
+    loaders: Sequence[Callable[[type], Iterator[Tuple[Mapping[str, Any], Mapping]]]],
+    resolver: Callable[[Iterator[Tuple[Mapping[str, Any], Mapping]], type], Mapping[str, Any]],
 ) -> Callable[[type], type]:
     @classmethod  # type: ignore[misc]
     def resolve_sources(cls) -> Mapping:
