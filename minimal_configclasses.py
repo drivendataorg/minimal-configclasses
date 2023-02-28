@@ -71,10 +71,10 @@ class TomlFileLoader:
 
         if self.check_xdg_config_home_dir:
             for file_name in self.file_names:
-                yield dir / file_name
+                yield Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / file_name
         if self.check_home_dir:
             for file_name in self.file_names:
-                yield dir / file_name
+                yield Path.home() / file_name
 
     def load(self, path: Path) -> Dict[str, Any]:
         with path.open("rb") as fp:
@@ -82,6 +82,8 @@ class TomlFileLoader:
         keys = list(self.names)
         if path.name == "pyproject.toml":
             keys = ["tool"] + keys
+        else:
+            keys = keys[1:]
         try:
             key_path = ""
             for key in keys:
@@ -117,10 +119,16 @@ class EnvVarLoader:
     def prefix(self):
         return "_".join(n.upper() for n in self.names) + "_"
 
+    def load(self) -> Tuple[str, str]:
+        for key, val in os.environ.items():
+            if key.startswith(self.prefix):
+                field_name = key[len(self.prefix) :].lower()
+                yield field_name, val
+
     def env_var_to_field_name(self, env_var: str):
         return env_var[len(self.prefix) :].lower()
 
-    def convert_env_var_to_type(self, val: str, field_type):
+    def convert_to_type(self, val: str, field_type):
         if field_type in {int, float, complex}:
             return field_type(val)
         elif field_type is bytes:
@@ -132,6 +140,8 @@ class EnvVarLoader:
                 return False
             else:
                 raise ValueError("Unable to convert bool value:", val)
+        elif field_type in {list, tuple, dict}:
+            return field_type(tomllib.loads(f"val = {val}")["val"])
         elif get_origin(field_type) in {list, tuple, dict}:
             return get_origin(field_type)(  # type: ignore[misc]
                 tomllib.loads(f"val = {val}")["val"]
@@ -139,21 +149,15 @@ class EnvVarLoader:
         return val
 
     def __call__(self, data_class: type) -> Iterator[Tuple[Mapping[str, Any], Mapping]]:
-        data = {
-            self.env_var_to_field_name(key): value
-            for key, value in os.environ.items()
-            if key.startswith(self.prefix)
-        }
         if self.convert_types:
-            if dataclasses.is_dataclass(data_class):
-                field_type_hints = get_type_hints(data_class)
-                data = {
-                    key: self.convert_env_var_to_type(value, field_type_hints[key])
-                    for key, value in data.items()
-                }
-            else:
-                # Not a dataclass
-                pass
+            field_type_hints = get_type_hints(data_class)
+        else:
+            field_type_hints = {}
+        data = {}
+        for field_name, val in self.load():
+            if field_name in field_type_hints:
+                val = self.convert_to_type(val, field_type_hints[field_name])
+            data[field_name] = val
         yield data, {"loader": self}
 
 
