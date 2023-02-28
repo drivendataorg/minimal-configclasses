@@ -1,4 +1,3 @@
-import collections.abc
 import dataclasses
 from itertools import chain, islice
 import os
@@ -7,10 +6,8 @@ from typing import (
     Any,
     Callable,
     Dict,
-    Generic,
     Iterable,
     Iterator,
-    List,
     Mapping,
     Optional,
     Sequence,
@@ -167,31 +164,6 @@ _KT = TypeVar("_KT")
 _VT = TypeVar("_VT")
 
 
-class ReadOnlyChainMap(collections.abc.Mapping, Generic[_KT, _VT]):
-    """A read-only ChainMap implementation. Combines multiple mappings for sequential lookup.
-    Adapted from collections.ChainMap implementation https://github.com/python/cpython."""
-
-    def __init__(self, *maps: Mapping[_KT, _VT]):
-        self.maps: List[Mapping[_KT, _VT]] = list(maps) or [{}]  # always at least one map
-
-    def __getitem__(self, key: _KT) -> _VT:
-        for mapping in self.maps:
-            try:
-                return mapping[key]  # can't use 'key in mapping' with defaultdict
-            except KeyError:
-                pass
-        raise KeyError(key)
-
-    def __len__(self) -> int:
-        return len(set().union(*self.maps))  # reuses stored hash values if possible
-
-    def __iter__(self) -> Iterator[_KT]:
-        d = {}  # type: ignore[var-annotated]
-        for mapping in map(dict.fromkeys, reversed(self.maps)):  # type: ignore[arg-type]
-            d |= mapping  # reuses stored hash values if possible
-        return iter(d)
-
-
 @dataclasses.dataclass
 class MergeResolver:
     n: Optional[int] = None
@@ -199,13 +171,96 @@ class MergeResolver:
     def __call__(
         self, sources: Iterator[Tuple[Mapping[str, Any], Mapping]], data_class: type
     ) -> Mapping[str, Any]:
-        if self.n is None:
-            return ReadOnlyChainMap(*(item[0] for item in sources))
-        else:
-            return ReadOnlyChainMap(*(item[0] for item in islice(sources, self.n)))
+        if self.n is not None:
+            sources = islice(sources, self.n)
+        # collections.ChainMap has annoying typing properties because it is mutable
+        # https://github.com/python/typeshed/issues/8430
+        # Use dict with itertools.chain instead
+        return dict(chain.from_iterable(s[0].items() for s in reversed(tuple(sources))))
+
+
+LOADERS_ATTR = "__configclass_loaders__"
+RESOLVER_ATTR = "__configclass_resolver__"
+RESOLVE_SOURCES_METHOD = "__configclass_resolve_sources__"
+
+
+def loaders(obj) -> Sequence[Callable[[type], Iterator[Tuple[Mapping[str, Any], Mapping]]]]:
+    """Returns the sequence of loader callables added to a configclass."""
+    try:
+        return getattr(obj, LOADERS_ATTR)
+    except AttributeError:
+        raise TypeError("Must be called with configclass type or instance.")
+
+
+def resolver(
+    obj,
+) -> Callable[[Iterator[Tuple[Mapping[str, Any], Mapping]], type], Mapping[str, Any]]:
+    """Returns the resolver callable added to a configclass."""
+    try:
+        return getattr(obj, RESOLVER_ATTR)
+    except AttributeError:
+        raise TypeError("Must be called with configclass type or instance.")
+
+
+@classmethod  # type: ignore[misc]
+def _resolve_sources_method(cls) -> Mapping[str, Any]:
+    """Class method to load and resolve configuration data. Added to a configclass by the
+    configclass decorator.
+    """
+    loaders = getattr(cls, LOADERS_ATTR)
+    resolver = getattr(cls, RESOLVER_ATTR)
+    config_data = chain(*(loader(cls) for loader in loaders))
+    return resolver(config_data, cls)
+
+
+def resolve_sources(obj) -> Mapping[str, Any]:
+    """Given a configclass or configclass instance, loads configuration data and resolves them
+    according to the configclass' loaders and resolver.
+    """
+    try:
+        return getattr(obj, RESOLVE_SOURCES_METHOD)()
+    except AttributeError:
+        raise TypeError("Must be called with configclass type or instance.")
+
+
+def configclass(
+    loaders: Sequence[Callable[[type], Iterator[Tuple[Mapping[str, Any], Mapping]]]],
+    resolver: Callable[[Iterator[Tuple[Mapping[str, Any], Mapping]], type], Mapping[str, Any]],
+) -> Callable[[type], type]:
+    def configclass_decorator(cls: type) -> type:
+        setattr(cls, LOADERS_ATTR, loaders)
+        setattr(cls, RESOLVER_ATTR, resolver)
+        setattr(cls, RESOLVE_SOURCES_METHOD, _resolve_sources_method)
+        original_init = cls.__init__  # type: ignore[misc]
+
+        def init_wrapper(self, *args, **kwargs):
+            # Merge resolved data with kwargs. kwargs has priority
+            kwargs = {**resolve_sources(self), **kwargs}
+            original_init(self, *args, **kwargs)
+
+        cls.__init__ = init_wrapper  # type: ignore[misc]
+        return cls
+
+    return configclass_decorator
+
+
+def is_configclass(obj: Any) -> bool:
+    """Returns `True` if its parameter is a configclass or an instance of a configclass, otherwise
+    returns `False`. This is determined by a simple
+
+    If you need to know if the input is an instance of a configclass (and not a configclass
+    itself), then add a further check for not `isinstance(obj, type)`.
+    """
+    cls = obj if isinstance(obj, type) else type(obj)
+    return hasattr(cls, RESOLVE_SOURCES_METHOD)
 
 
 def simple_configclass(name: str) -> Callable[[type], type]:
+    if isinstance(name, type):
+        raise ValueError(
+            "simple_configclass must be called with a name argument, e.g., "
+            "@simpleconfig_class(name=...)"
+        )
     return configclass(
         loaders=[
             EnvVarLoader(name),
@@ -213,26 +268,3 @@ def simple_configclass(name: str) -> Callable[[type], type]:
         ],
         resolver=MergeResolver(),
     )
-
-
-def configclass(
-    loaders: Sequence[Callable[[type], Iterator[Tuple[Mapping[str, Any], Mapping]]]],
-    resolver: Callable[[Iterator[Tuple[Mapping[str, Any], Mapping]], type], Mapping[str, Any]],
-) -> Callable[[type], type]:
-    @classmethod  # type: ignore[misc]
-    def resolve_sources(cls) -> Mapping:
-        file_data = chain(*(loader(cls) for loader in loaders))
-        return resolver(file_data, cls)
-
-    def decorator(cls):
-        cls.resolve_sources = resolve_sources
-        original_init = cls.__init__
-
-        def init_wrapper(self, *args, **kwargs):
-            kwargs = {**self.resolve_sources(), **kwargs}
-            original_init(self, *args, **kwargs)
-
-        cls.__init__ = init_wrapper
-        return cls
-
-    return decorator
