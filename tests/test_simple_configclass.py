@@ -14,7 +14,13 @@ TOOL_NAME = "testtool"
 
 @pytest.fixture
 def config_file_data():
-    return {"var_int": 100, "var_str": "custom"}
+    return {"var_int": 10, "var_str": "from_file"}
+
+
+@pytest.fixture
+def env_vars(monkeypatch):
+    monkeypatch.setenv(f"{TOOL_NAME.upper()}_VAR_BOOL", "true")
+    monkeypatch.setenv(f"{TOOL_NAME.upper()}_VAR_STR", "from_env")
 
 
 @pytest.fixture
@@ -29,42 +35,76 @@ def pyproject_toml_file(config_file_data, tmp_path):
     os.chdir(orig_cwd)
 
 
-def test_simple_configclass_dataclass(pyproject_toml_file):
-    @simple_configclass(name=TOOL_NAME)
+def test_simple_configclass_dataclass_pyproject_toml(pyproject_toml_file):
+    @simple_configclass(TOOL_NAME)
     @dataclasses.dataclass
     class DataClassConfig:
         var_int: int = 0
         var_bool: bool = False
         var_str: str = "default"
 
+    config = DataClassConfig()
+    assert config.var_int == 10
+    assert config.var_bool is False
+    assert config.var_str == "from_file"
+
     config = DataClassConfig(var_int=9001)
     assert config.var_int == 9001
     assert config.var_bool is False
-    assert config.var_str == "custom"
+    assert config.var_str == "from_file"
 
 
-def test_simple_configclass_pydantic(pyproject_toml_file):
-    @simple_configclass(name=TOOL_NAME)
+def test_simple_configclass_dataclass_env_var_pyproject_toml(env_vars, pyproject_toml_file):
+    @simple_configclass(TOOL_NAME)
+    @dataclasses.dataclass
+    class DataClassConfig:
+        var_int: int = 0
+        var_bool: bool = False
+        var_str: str = "default"
+
+    config = DataClassConfig()
+    assert config.var_int == 10
+    assert config.var_bool is True
+    assert config.var_str == "from_env"
+
+    config = DataClassConfig(var_int=9001, var_bool=False)
+    assert config.var_int == 9001
+    assert config.var_bool is False
+    assert config.var_str == "from_env"
+
+
+def test_simple_configclass_pydantic_pyproject_toml(pyproject_toml_file):
+    @simple_configclass(TOOL_NAME)
     class PydanticConfig(pydantic.BaseModel):
         var_int: int = 0
         var_bool: bool = False
         var_str: str = "default"
 
+    config = PydanticConfig()
+    assert config.var_int == 10
+    assert config.var_bool is False
+    assert config.var_str == "from_file"
+
     config = PydanticConfig(var_int=9001)
     assert config.var_int == 9001
     assert config.var_bool is False
-    assert config.var_str == "custom"
+    assert config.var_str == "from_file"
 
 
-def test_simple_configclass_attrs(pyproject_toml_file):
-    @simple_configclass(name=TOOL_NAME)
+def test_simple_configclass_attrs_pyproject_toml(pyproject_toml_file):
+    @simple_configclass(TOOL_NAME)
     @attrs.define
     class AttrsConfig:
         var_int: int = 0
         var_bool: bool = False
         var_str: str = "default"
 
+    config = AttrsConfig()
+    assert config.var_int == 10
+    assert config.var_bool is False
+    assert config.var_str == "from_file"
+
     config = AttrsConfig(var_int=9001)
     assert config.var_int == 9001
     assert config.var_bool is False
-    assert config.var_str == "custom"
+    assert config.var_str == "from_file"

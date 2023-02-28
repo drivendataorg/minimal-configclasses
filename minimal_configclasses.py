@@ -39,19 +39,19 @@ def is_dict_with_str_keys(d: Any) -> TypeGuard[Dict[str, Any]]:
 
 @dataclasses.dataclass
 class TomlFileLoader:
-    name: str
+    names: Sequence[str]
     convert_hyphens: bool = True
     check_pyproject_toml: bool = True
     file_name_templates: Iterable[str] = ("{name}.toml", ".{name}.toml")
     recursive_search = True
     stop_on_repo_root = True
-    check_home_dir: bool = True
     check_xdg_config_home_dir: bool = True
+    check_home_dir: bool = True
 
     @property
     def file_names(self) -> Iterator[str]:
         for template in self.file_name_templates:
-            yield template.format(name=self.name)
+            yield template.format(name=self.names[0])
 
     @property
     def paths_to_check(self) -> Iterator[Path]:
@@ -69,26 +69,30 @@ class TomlFileLoader:
             ):
                 break
 
-        if self.check_home_dir:
+        if self.check_xdg_config_home_dir:
             for file_name in self.file_names:
                 yield dir / file_name
-        if self.check_xdg_config_home_dir:
+        if self.check_home_dir:
             for file_name in self.file_names:
                 yield dir / file_name
 
     def load(self, path: Path) -> Dict[str, Any]:
         with path.open("rb") as fp:
             data = tomllib.load(fp)
+        keys = list(self.names)
         if path.name == "pyproject.toml":
-            if is_dict_with_str_keys(data["tool"][self.name]):
-                return data["tool"][self.name]
-            else:
-                raise TypeError(
-                    f"tool.{self.name} must be a TOML table. "
-                    f"Got: {type(data['tool'][self.name])}"
-                )
-        else:
+            keys = ["tool"] + keys
+        try:
+            key_path = ""
+            for key in keys:
+                data = data[key]
+                key_path += "." + key
             return data
+        except KeyError:
+            # This is fine because configuration is optional
+            pass
+        except TypeError:
+            raise TypeError(f"Expected {key_path} to be a TOML table. Got: {type(data)}")
 
     def __call__(self, data_class: type) -> Iterator[Tuple[Mapping[str, Mapping], Mapping]]:
         for path in self.paths_to_check:
@@ -106,12 +110,12 @@ class TomlFileLoader:
 
 @dataclasses.dataclass
 class EnvVarLoader:
-    name: str
+    names: Sequence[str]
     convert_types: bool = True
 
     @property
     def prefix(self):
-        return self.name.upper() + "_"
+        return "_".join(n.upper() for n in self.names) + "_"
 
     def env_var_to_field_name(self, env_var: str):
         return env_var[len(self.prefix) :].lower()
@@ -255,16 +259,16 @@ def is_configclass(obj: Any) -> bool:
     return hasattr(cls, RESOLVE_SOURCES_METHOD)
 
 
-def simple_configclass(name: str) -> Callable[[type], type]:
-    if isinstance(name, type):
+def simple_configclass(*names: str) -> Callable[[type], type]:
+    if len(names) < 1 or isinstance(names[0], type):
         raise ValueError(
-            "simple_configclass must be called with a name argument, e.g., "
-            "@simpleconfig_class(name=...)"
+            "simple_configclass must be called with at least one name argument, e.g., "
+            "@simpleconfig_class('myproject')"
         )
     return configclass(
         loaders=[
-            EnvVarLoader(name),
-            TomlFileLoader(name),
+            EnvVarLoader(names),
+            TomlFileLoader(names),
         ],
         resolver=MergeResolver(),
     )
