@@ -17,20 +17,19 @@ from typing import (
 )
 
 try:
-    from typing import TypeGuard  # type: ignore[attr-defined]
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
+
+try:
+    from typing import TypeGuard  # type: ignore[attr-defined] # Python 3.10+
 except ImportError:
     from typing_extensions import TypeGuard
 
 try:
-    from typing import get_origin
+    from typing import get_origin  # Python 3.8+
 except ImportError:
     from typing_extensions import get_origin
-
-
-try:
-    import tomllib
-except ModuleNotFoundError:
-    import tomli as tomllib
 
 
 def is_dict_with_str_keys(d: Any) -> TypeGuard[Dict[str, Any]]:
