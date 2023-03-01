@@ -158,7 +158,7 @@ class EnvVarLoader:
                 val = self.convert_to_type(val, field_type_hints[field_name])
             data[field_name] = val
         if not data:
-            # Don't yield anything
+            # Don't yield anything if we didn't find any matching env vars
             return
         yield data, {"loader": self}
 
