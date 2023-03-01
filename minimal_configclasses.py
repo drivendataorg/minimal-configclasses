@@ -89,12 +89,12 @@ class TomlFileLoader:
             for key in keys:
                 data = data[key]
                 key_path += "." + key
-            return data
         except KeyError:
             # This is fine because configuration is optional
             pass
         except TypeError:
             raise TypeError(f"Expected {key_path} to be a TOML table. Got: {type(data)}")
+        return data
 
     def __call__(self, data_class: type) -> Iterator[Tuple[Mapping[str, Mapping], Mapping]]:
         for path in self.paths_to_check:
@@ -106,7 +106,7 @@ class TomlFileLoader:
             except FileNotFoundError:
                 pass
             except KeyError as e:
-                if e.args not in {("tool",), (self.name,)}:
+                if e.args not in {("tool",)} | {(name,) for name in self.names}:
                     raise
 
 
@@ -119,7 +119,7 @@ class EnvVarLoader:
     def prefix(self):
         return "_".join(n.upper() for n in self.names) + "_"
 
-    def load(self) -> Tuple[str, str]:
+    def load(self) -> Iterator[Tuple[str, str]]:
         for key, val in os.environ.items():
             if key.startswith(self.prefix):
                 field_name = key[len(self.prefix) :].lower()
@@ -158,14 +158,17 @@ class EnvVarLoader:
             if field_name in field_type_hints:
                 val = self.convert_to_type(val, field_type_hints[field_name])
             data[field_name] = val
+        if not data:
+            # Don't yield anything
+            return
         yield data, {"loader": self}
 
 
 class FirstOnlyResolver:
     def __call__(
-        self, sources: Iterator[Tuple[Mapping[str, Any], Mapping]], data_class: type
+        self, sources: Iterable[Tuple[Mapping[str, Any], Mapping]], data_class: type
     ) -> Mapping:
-        return next(sources)[0]
+        return next(iter(sources))[0]
 
 
 _KT = TypeVar("_KT")
@@ -177,7 +180,7 @@ class MergeResolver:
     n: Optional[int] = None
 
     def __call__(
-        self, sources: Iterator[Tuple[Mapping[str, Any], Mapping]], data_class: type
+        self, sources: Iterable[Tuple[Mapping[str, Any], Mapping]], data_class: type
     ) -> Mapping[str, Any]:
         if self.n is not None:
             sources = islice(sources, self.n)
@@ -202,7 +205,7 @@ def loaders(obj) -> Sequence[Callable[[type], Iterator[Tuple[Mapping[str, Any], 
 
 def resolver(
     obj,
-) -> Callable[[Iterator[Tuple[Mapping[str, Any], Mapping]], type], Mapping[str, Any]]:
+) -> Callable[[Iterable[Tuple[Mapping[str, Any], Mapping]], type], Mapping[str, Any]]:
     """Returns the resolver callable added to a configclass."""
     try:
         return getattr(obj, RESOLVER_ATTR)
@@ -233,7 +236,7 @@ def resolve_sources(obj) -> Mapping[str, Any]:
 
 def configclass(
     loaders: Sequence[Callable[[type], Iterator[Tuple[Mapping[str, Any], Mapping]]]],
-    resolver: Callable[[Iterator[Tuple[Mapping[str, Any], Mapping]], type], Mapping[str, Any]],
+    resolver: Callable[[Iterable[Tuple[Mapping[str, Any], Mapping]], type], Mapping[str, Any]],
 ) -> Callable[[type], type]:
     def configclass_decorator(cls: type) -> type:
         setattr(cls, LOADERS_ATTR, loaders)

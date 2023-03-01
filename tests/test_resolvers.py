@@ -14,10 +14,10 @@ def test_mergeresolver():
         c: int
 
     merge_all_resolver = MergeResolver()
-    assert merge_all_resolver(iter(source_data), ConfigClass) == {"a": 0, "b": 1, "c": 2}
+    assert merge_all_resolver(source_data, ConfigClass) == {"a": 0, "b": 1, "c": 2}
 
     merge_two_resolver = MergeResolver(2)
-    assert merge_two_resolver(iter(source_data), ConfigClass) == {"a": 0, "b": 1}
+    assert merge_two_resolver(source_data, ConfigClass) == {"a": 0, "b": 1}
 
 
 def test_firstonlyresolver():
@@ -33,4 +33,4 @@ def test_firstonlyresolver():
         c: int
 
     first_only_resolver = FirstOnlyResolver()
-    assert first_only_resolver(iter(source_data), ConfigClass) == {"a": 0}
+    assert first_only_resolver(source_data, ConfigClass) == {"a": 0}
