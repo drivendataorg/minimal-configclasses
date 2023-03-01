@@ -7,6 +7,8 @@
 - Simple and straightforward extensibility: write loader functions that load source data into dictionaries and resolver functions that resolve multiple dictionaries into one.
 - Zero dependencies for 3.11 or higher, and only standard library backports for lower Python versions.
 
+When you initialize a config class, it will run a hook to load configuration values from specified sources and resolve them into a single set. Those values then get injected in between user-specified arguments and the defaults defined on the class.
+
 ```python
 from dataclasses import dataclass
 from pathlib import Path
@@ -83,20 +85,20 @@ The `@configclass` decorator is able to take multiple loaders. It will call each
 
 ### Custom resolvers
 
-A resolver is a callable that takes all `(data, metadata)` tuples from the loaders and resolves everything into a single configuration data mapping (i.e., dictionary or dictionary-like object) that will be passed to data class initialization. A minimal function template is shown below:
+A resolver is a callable that receives `(data, metadata)` tuples from the loaders and resolves everything into a single configuration data mapping (i.e., dictionary or dictionary-like object) that will be passed to data class initialization. A minimal function template is shown below:
 
 ```python
 def my_resolver(
-        sources: Iterator[Tuple[Mapping[str, Any], Mapping]], data_class: type
+        sources: Iterable[Tuple[Mapping[str, Any], Mapping]], data_class: type
     ) -> Mapping[str, Any]:
     ...
 ```
 
 Like the loaders, the resolver is passed the config data class as an argument. This allows you to define behavior that depends information from the data class definition.
 
-## Limitations and Design Trade-offs
+## Limitations and Design Choices
 
-- **Only TOML config files have out-of-the-box support.** In order to keep this library simple and minimal, we only support loading config files in TOML format. Python has adopted `pyproject.toml` as a standard place for tools to read configuration data ([PEP 518](https://peps.python.org/pep-0518/#tool-table)). Reading TOML is available as part of the tomllib standard library module since Python 3.11, and it is available to earlier Python versions from the zero-dependency backport library [tomli](https://github.com/hukkin/tomli). You can easily implement your own loader for other file formats, such as INI files and YAML. See ["Custom loaders"](#custom-loaders).
+- **Only TOML config files have out-of-the-box support.** In order to keep this library simple and minimal, we only support loading config files in TOML format. Python has adopted `pyproject.toml` as a standard place for tools to read configuration data from ([PEP 518](https://peps.python.org/pep-0518/#tool-table)). Reading TOML is available as part of the tomllib standard library module since Python 3.11, and it is available to earlier Python versions from the zero-dependency backport library [tomli](https://github.com/hukkin/tomli). If you want to read other formats, you can easily implement your own loader for other file formats, such as INI files and YAML. See ["Custom loaders"](#custom-loaders).
     - **Why not JSON?** JSON is not a common format for configuration files.
     - **Why not INI?** TOML files are a modern standard format for Python configuration. If you're newly implementing configuration files for a tool, you should just use TOML.
     - **Why not YAML?** The Python standard library does not include a YAML parser.
