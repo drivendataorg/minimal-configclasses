@@ -1,4 +1,5 @@
 import dataclasses
+from functools import wraps
 from itertools import chain, islice
 import os
 from pathlib import Path
@@ -12,12 +13,11 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
-    TypeVar,
     get_type_hints,
 )
 
 try:
-    import tomllib
+    import tomllib  # Python 3.11+
 except ModuleNotFoundError:
     import tomli as tomllib
 
@@ -38,6 +38,10 @@ def is_dict_with_str_keys(d: Any) -> TypeGuard[Dict[str, Any]]:
 
 @dataclasses.dataclass
 class TomlFileLoader:
+    """Constructs a loader callable that searches for pyproject.toml and specific-name TOML files
+    and yields configuration data from them.
+    """
+
     names: Sequence[str]
     convert_hyphens: bool = True
     check_pyproject_toml: bool = True
@@ -90,7 +94,7 @@ class TomlFileLoader:
                 key_path += "." + key
         except KeyError:
             # This is fine because configuration is optional
-            pass
+            raise
         except TypeError:
             raise TypeError(f"Expected {key_path} to be a TOML table. Got: {type(data)}")
         return data
@@ -104,15 +108,15 @@ class TomlFileLoader:
                 yield (data, {"loader": self, "path": path})
             except FileNotFoundError:
                 pass
-            except KeyError as e:
-                if e.args not in {("tool",)} | {(name,) for name in self.names}:
-                    raise
 
 
 @dataclasses.dataclass
 class EnvVarLoader:
+    """Constructs a loader that yields configuration data from environment variables."""
+
     names: Sequence[str]
     convert_types: bool = True
+    to_field_name_transform: Callable[[str], str] = lambda s: s.lower()  # noqa: E731
 
     @property
     def prefix(self):
@@ -121,11 +125,8 @@ class EnvVarLoader:
     def load(self) -> Iterator[Tuple[str, str]]:
         for key, val in os.environ.items():
             if key.startswith(self.prefix):
-                field_name = key[len(self.prefix) :].lower()
+                field_name = self.to_field_name_transform(key[len(self.prefix) :])
                 yield field_name, val
-
-    def env_var_to_field_name(self, env_var: str):
-        return env_var[len(self.prefix) :].lower()
 
     def convert_to_type(self, val: str, field_type):
         if field_type in {int, float, complex}:
@@ -163,30 +164,44 @@ class EnvVarLoader:
         yield data, {"loader": self}
 
 
-class FirstOnlyResolver:
-    def __call__(
-        self, sources: Iterable[Tuple[Mapping[str, Any], Mapping]], data_class: type
-    ) -> Mapping:
-        return next(iter(sources))[0]
+def first_only_resolver(
+    sources: Iterable[Tuple[Mapping[str, Any], Mapping]], data_class: type
+) -> Mapping:
+    """Resolver function that returns configuration data from only the first source."""
+    return next(iter(sources))[0]
 
 
-_KT = TypeVar("_KT")
-_VT = TypeVar("_VT")
+def merge_all_resolver(
+    sources: Iterable[Tuple[Mapping[str, Any], Mapping]], data_class: type
+) -> Mapping:
+    """Resolver function that merges configuration data from all sources that it receives, with
+    earlier sources having precedence"""
+    # collections.ChainMap has annoying typing properties because it is mutable
+    # https://github.com/python/typeshed/issues/8430
+    # Use dict with itertools.chain instead
+    return dict(chain.from_iterable(s[0].items() for s in reversed(tuple(sources))))
 
 
-@dataclasses.dataclass
-class MergeResolver:
-    n: Optional[int] = None
+def merge_env_var_and_first_toml_resolver(
+    sources: Iterable[Tuple[Mapping[str, Any], Mapping]], data_class: type
+) -> Mapping:
+    """Resolver function that merges environment variables with the first TOML configuration
+    file source."""
 
-    def __call__(
-        self, sources: Iterable[Tuple[Mapping[str, Any], Mapping]], data_class: type
-    ) -> Mapping[str, Any]:
-        if self.n is not None:
-            sources = islice(sources, self.n)
-        # collections.ChainMap has annoying typing properties because it is mutable
-        # https://github.com/python/typeshed/issues/8430
-        # Use dict with itertools.chain instead
-        return dict(chain.from_iterable(s[0].items() for s in reversed(tuple(sources))))
+    def filter_sources(sources):
+        found_env_var = False
+        found_toml_file = False
+        for source in sources:
+            if isinstance(source[1].get("loader"), EnvVarLoader) and not found_env_var:
+                found_env_var = True
+                yield source
+            elif isinstance(source[1].get("loader"), TomlFileLoader) and not found_toml_file:
+                found_toml_file = True
+                yield source
+            if found_env_var and found_toml_file:
+                return
+
+    return merge_all_resolver(filter_sources(sources), data_class)
 
 
 LOADERS_ATTR = "__configclass_loaders__"
@@ -243,6 +258,7 @@ def configclass(
         setattr(cls, RESOLVE_SOURCES_METHOD, _resolve_sources_method)
         original_init = cls.__init__  # type: ignore[misc]
 
+        @wraps(original_init)
         def init_wrapper(self, *args, **kwargs):
             # Merge resolved data with kwargs. kwargs has priority
             kwargs = {**resolve_sources(self), **kwargs}
@@ -276,5 +292,5 @@ def simple_configclass(*names: str) -> Callable[[type], type]:
             EnvVarLoader(names),
             TomlFileLoader(names),
         ],
-        resolver=MergeResolver(),
+        resolver=merge_all_resolver,
     )

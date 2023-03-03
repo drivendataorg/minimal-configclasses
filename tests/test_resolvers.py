@@ -1,7 +1,13 @@
-from minimal_configclasses import FirstOnlyResolver, MergeResolver
+from minimal_configclasses import (
+    EnvVarLoader,
+    TomlFileLoader,
+    first_only_resolver,
+    merge_all_resolver,
+    merge_env_var_and_first_toml_resolver,
+)
 
 
-def test_mergeresolver():
+def test_merge_all_resolver():
     source_data = [
         ({"a": 0}, {}),
         ({"a": 1, "b": 1}, {}),
@@ -13,14 +19,10 @@ def test_mergeresolver():
         b: int
         c: int
 
-    merge_all_resolver = MergeResolver()
     assert merge_all_resolver(source_data, ConfigClass) == {"a": 0, "b": 1, "c": 2}
 
-    merge_two_resolver = MergeResolver(2)
-    assert merge_two_resolver(source_data, ConfigClass) == {"a": 0, "b": 1}
 
-
-def test_firstonlyresolver():
+def test_first_only_resolver():
     source_data = [
         ({"a": 0}, {}),
         ({"a": 1, "b": 1}, {}),
@@ -32,5 +34,21 @@ def test_firstonlyresolver():
         b: int
         c: int
 
-    first_only_resolver = FirstOnlyResolver()
     assert first_only_resolver(source_data, ConfigClass) == {"a": 0}
+
+
+def test_merge_env_var_and_first_toml_resolver():
+    env_var_loader = EnvVarLoader(names=["foo"])
+    toml_file_loader = TomlFileLoader(names=["foo"])
+    source_data = [
+        ({"a": 0}, {"loader": env_var_loader}),
+        ({"a": 1, "b": 1}, {"loader": toml_file_loader}),
+        ({"a": 2, "b": 2, "c": 2}, {"loader": toml_file_loader}),
+    ]
+
+    class ConfigClass:
+        a: int
+        b: int
+        c: int
+
+    assert merge_env_var_and_first_toml_resolver(source_data, ConfigClass) == {"a": 0, "b": 1}

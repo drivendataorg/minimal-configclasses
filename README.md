@@ -2,7 +2,7 @@
 
 **A minimal Python library for creating config classes: a data class that can load defaults from other sources.**
 
-- Dead easy API: stack a `@configclass` decorator on any class with dataclass-like initialization semantics, such as standard library [dataclasses](https://docs.python.org/3/library/dataclasses.html), [Pydantic `BaseModel`s](https://docs.pydantic.dev/usage/models/), or [attrs classes](https://www.attrs.org/en/stable/overview.html).
+- Dead easy API: stack a `@configclass` decorator on any class with dataclass-like initialization semantics, such as standard library [dataclasses](https://docs.python.org/3/library/dataclasses.html), [Pydantic `BaseModel`s](https://docs.pydantic.dev/usage/models/), or [attrs classes](https://www.attrs.org/en/stable/overview.html). Inspired by the simple API of dataclasses.
 - A sane out-of-the-box implemention `@simple_configclass` that merges values from environment variables, `pyproject.toml` files, and TOML config files in conventional locations.
 - Simple and straightforward extensibility: write loader functions that load source data into dictionaries and resolver functions that resolve multiple dictionaries into one.
 - Zero dependencies for 3.11 or higher, and only standard library backports for lower Python versions.
@@ -56,7 +56,7 @@ minimal-configclasses provides a few built-in loaders and resolvers that you can
 ```python
 @configclass(
     loaders=[EnvVarLoader(names), TomlFileLoader(names)],
-    resolver=MergeResolver(),
+    resolver=merge_all_resolver,
 )
 ```
 
@@ -64,7 +64,7 @@ The built-in loaders have additional parameters you can set when initializing th
 
 ## Supplying your own loaders and resolvers
 
-If the built-in loaders or resolvers don't meet your needs, you can easily write your own. Loaders and resolvers simply need to be callables that match required argument and return signatures. While the built-in implementations from minimal-configclasses are implemented as classes, valid loaders and resolvers don't need to be classes in general—you can simply write functions. Classes are only necessarily if you want parameterize their behavior for reuse them in different situations.
+If the built-in loaders or resolvers don't meet your needs, you can easily write your own. Loaders and resolvers simply need to be callables that match required argument and return signatures. While some built-in implementations from minimal-configclasses are implemented as classes, valid loaders and resolvers don't need to be classes in general—you can simply write functions. Classes are only necessarily if you want parameterize their behavior for reuse in different situations.
 
 ### Custom loaders
 
