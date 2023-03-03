@@ -1,6 +1,6 @@
 import dataclasses
 from functools import wraps
-from itertools import chain, islice
+from itertools import chain
 import os
 from pathlib import Path
 from typing import (
@@ -10,7 +10,6 @@ from typing import (
     Iterable,
     Iterator,
     Mapping,
-    Optional,
     Sequence,
     Tuple,
     get_type_hints,
