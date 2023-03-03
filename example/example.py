@@ -4,7 +4,7 @@ from pathlib import Path
 from minimal_configclasses import simple_configclass
 
 
-@simple_configclass(name="myexample")
+@simple_configclass("myexample")
 @dataclass
 class MyExampleConfig:
     var_a: int = 0
