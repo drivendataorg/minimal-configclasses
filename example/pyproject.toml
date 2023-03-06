@@ -1,3 +1,6 @@
 [tool.myexample]
 var_a = 100
 var_c = "custom"
+
+[tool.black]
+extend-exclude = "example\\.py"

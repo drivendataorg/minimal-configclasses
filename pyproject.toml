@@ -26,17 +26,7 @@ dependencies = [
 [tool.black]
 line-length = 99
 include = '\.pyi?$'
-exclude = '''
-/(
-    \.eggs
-  | \.git
-  | \.mypy_cache
-  | \.tox
-  | \.venv
-  | build
-  | dist
-)/
-'''
+
 
 [tool.ruff]
 line-length = 99

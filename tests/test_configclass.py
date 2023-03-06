@@ -7,7 +7,7 @@ import pydantic
 import pytest
 import tomli_w
 
-from minimal_configclasses import simple_configclass
+from minimal_configclasses import configclass
 
 TOOL_NAME = "testtool"
 
@@ -35,8 +35,8 @@ def pyproject_toml_file(config_file_data, tmp_path):
     os.chdir(orig_cwd)
 
 
-def test_simple_configclass_dataclass_pyproject_toml(pyproject_toml_file):
-    @simple_configclass(TOOL_NAME)
+def test_configclass_dataclass_pyproject_toml(pyproject_toml_file):
+    @configclass(TOOL_NAME)
     @dataclasses.dataclass
     class DataClassConfig:
         var_int: int = 0
@@ -54,8 +54,8 @@ def test_simple_configclass_dataclass_pyproject_toml(pyproject_toml_file):
     assert config.var_str == "from_file"
 
 
-def test_simple_configclass_dataclass_env_var_pyproject_toml(env_vars, pyproject_toml_file):
-    @simple_configclass(TOOL_NAME)
+def test_configclass_dataclass_env_var_pyproject_toml(env_vars, pyproject_toml_file):
+    @configclass(TOOL_NAME)
     @dataclasses.dataclass
     class DataClassConfig:
         var_int: int = 0
@@ -73,8 +73,8 @@ def test_simple_configclass_dataclass_env_var_pyproject_toml(env_vars, pyproject
     assert config.var_str == "from_env"
 
 
-def test_simple_configclass_pydantic_pyproject_toml(pyproject_toml_file):
-    @simple_configclass(TOOL_NAME)
+def test_configclass_pydantic_pyproject_toml(pyproject_toml_file):
+    @configclass(TOOL_NAME)
     class PydanticConfig(pydantic.BaseModel):
         var_int: int = 0
         var_bool: bool = False
@@ -91,8 +91,8 @@ def test_simple_configclass_pydantic_pyproject_toml(pyproject_toml_file):
     assert config.var_str == "from_file"
 
 
-def test_simple_configclass_attrs_pyproject_toml(pyproject_toml_file):
-    @simple_configclass(TOOL_NAME)
+def test_configclass_attrs_pyproject_toml(pyproject_toml_file):
+    @configclass(TOOL_NAME)
     @attrs.define
     class AttrsConfig:
         var_int: int = 0
