@@ -3,11 +3,11 @@
 **A minimal Python library for creating config classes: a data class that can load defaults from other sources.**
 
 - Dead easy API: stack a `@configclass` decorator on any class with dataclass-like initialization semantics, such as standard library [dataclasses](https://docs.python.org/3/library/dataclasses.html), [Pydantic `BaseModel` classes](https://docs.pydantic.dev/usage/models/), or [attrs classes](https://www.attrs.org/en/stable/overview.html). Inspired by the simple API of dataclasses.
-- A sane out-of-the-box default that merges values from environment variables, `pyproject.toml` files, and TOML config files in conventional locations.
-- Simple and straightforward extensibility: write loader functions that load source data into dictionaries.
-- Zero dependencies for 3.11 or higher, and only standard library backports for lower Python versions.
+- Sane default functionality that merges values from environment variables with an auto-discovered `pyproject.toml` file or named TOML configuration file.
+- Simple and straightforward extensibility: write loader functions that load source data into dictionaries and use with the `@custom_configclass` decorator.
+- Zero dependencies for 3.11 or newer, and only standard library backports for older Python versions.
 
-When you initialize a class decorated by `@configclass`, it will run a hook to load configuration values from certain sources and resolve them into a single set. Those values then get injected in between user-specified arguments and the defaults defined on the class.
+When you initialize a class decorated by `@configclass` or `@custom_configclass`, it will run a hook to load configuration values from designated sources and resolve them into a single set. Those values then get injected in between user-specified arguments and the defaults defined on the class.
 
 ```python
 from dataclasses import dataclass
@@ -29,7 +29,7 @@ print(Path("pyproject.toml").read_text())
 #> var_a = 100
 #> var_c = "from_file"
 
-# Resolution order: specified values > loaded sources > defaults
+# Resolution with increasing priority: defaults > loaded sources > passed values
 config = MyExampleConfig(var_a=9001)
 config
 #> MyExampleConfig(var_a=9001, var_b=False, var_c='from_file')
@@ -37,7 +37,7 @@ config
 
 ## @configclass: Out-of-the-box functionality
 
-The `@configclass` decorator provides easy-to-use out-of-the-box functionality. All you need to provide is one or more name strings that will be used as a namespace path to search for data. In the simplest case of one name:
+The `@configclass` decorator provides out-of-the-box functionality with a. All you need to provide is one or more name strings that will be used as a namespace path to search for data. In the simplest case of one name:
 
 - Checking for environment variables prefixed by `{name.upper()}_`
 - Checking for the `[tool.{name}]` table in any found `project.toml` files
@@ -73,7 +73,7 @@ Loaders will get called with the decorated data class as an argument, and they m
 
 The decorated data class is provided in case you need your loader's behavior to depend on it. For example, the built-in `EnvVarLoader` gets the field types from data class' type annotations and attempts to convert the values loaded from environment variables to those types.
 
-Loaders will get called in sequence, and their returned data will be resolved using a "last-seen wins" priority. If you want to use more complicated resolution logic, you can do so by wrapping your loaders inside a custom loader that implements the resolution logic internally.
+Loaders will get called in sequence, and their returned data will be resolved using "last-seen wins" logic. If you want to use more complicated resolution logic, you can do so by wrapping your loaders inside a custom loader that implements the resolution logic internally.
 
 You may notice that loaders in minimal-configclasses are defined as classes with a `__call__` method. This is only necessary if you plan to parameterize a loader's behavior with options so that they can be reused in different situations. In general, a loader can be as simple as just a function.
 
