@@ -40,30 +40,25 @@ Loader: TypeAlias = Callable[[type], Mapping[str, Any]]
 dictionary-like object) containing configuration data. It takes the configclass data class as an
 argument so that the it may have its behavior depend on the data class definition."""
 
-Resolver: TypeAlias = Callable[[Sequence[Loader], type], Mapping[str, Any]]
-"""Type alias for resolver callables. A valid resolver takes a sequence of Loader callables and the
-configclass data class. It is expected to call the loaders and resolve their outputs into a single
-Mapping (e.g., dictionary or dictionary-like object) of configuration data."""
-
-
 LOADERS_ATTR = "__configclass_loaders__"
-RESOLVER_ATTR = "__configclass_resolver__"
 RESOLVE_SOURCES_METHOD = "__configclass_resolve_sources__"
 
 
 @classmethod  # type: ignore[misc]
 def _resolve_sources_method(cls) -> Mapping[str, Any]:
-    """Class method to load and resolve configuration data. Added to a configclass by the
-    configclass decorator.
+    """Class method to load and resolve configuration data. Loaders are called in defined order,
+    and duplicate keys are resolved with "last-seen wins" logic. This method is added to a
+    configclass by the configclass decorator.
     """
     loaders = getattr(cls, LOADERS_ATTR)
-    resolver = getattr(cls, RESOLVER_ATTR)
-    return resolver(loaders, cls)
+    resolved = {}
+    for loader in loaders:
+        resolved.update(loader(cls))
+    return resolved
 
 
 def custom_configclass(
     loaders: Sequence[Loader],
-    resolver: Resolver,
 ) -> Callable[[type], type]:
     """Returns a decorator that adds functionality to a data class to load default values from
     specified sources. This is the general decorator factory that provides the ability to fully
@@ -71,22 +66,20 @@ def custom_configclass(
     meaning that it has an __init__ signature that can accept its attributes as keyword arguments.
 
     You must specify one or more loaders, which are responsible for loading configuration data from
-    some source, and a resolver, which is responsible for resolving configuration data from all
-    loaders into a single set of values. The resolved configuration data will be injected into the
-    initialization of the decorated data class in between any runtime-specified arguments and the
-    defaults that are defined on the data class.
+    some source. When the decorated class is initialized, it will call the loaders in order to load
+    configuration data. Keys that are duplicated across sources will be resolved with "last-seen
+    wins" priority. The resolved configuration data will be injected into the initialization of the
+    decorated data class in between any runtime-specified arguments and the defaults that are
+    defined on the data class.
 
     Arguments:
         loaders (Sequence[Loader]): A sequence of callables that return configuration data loaded
             from some source. See [Loader][minimal_configclasses.Loader] for the correct signature
             and documentation.
-        resolver (Resolver): A callable that will execute the loaders and resolve their outputs
-            into a single set of configuration data.
     """
 
     def configclass_decorator(cls: type) -> type:
         setattr(cls, LOADERS_ATTR, loaders)
-        setattr(cls, RESOLVER_ATTR, resolver)
         setattr(cls, RESOLVE_SOURCES_METHOD, _resolve_sources_method)
         original_init = cls.__init__  # type: ignore[misc]
 
@@ -106,7 +99,7 @@ def custom_configclass(
 
 
 def loaders(
-    obj,
+    obj: Any,
 ) -> Sequence[Callable[[type], Iterator[Tuple[Mapping[str, Any], Mapping]]]]:
     """Returns the sequence of loader callables added to a configclass."""
     try:
@@ -115,19 +108,10 @@ def loaders(
         raise TypeError("Must be called with configclass type or instance.")
 
 
-def resolver(
-    obj,
-) -> Callable[[Iterable[Tuple[Mapping[str, Any], Mapping]], type], Mapping[str, Any]]:
-    """Returns the resolver callable added to a configclass."""
-    try:
-        return getattr(obj, RESOLVER_ATTR)
-    except AttributeError:
-        raise TypeError("Must be called with configclass type or instance.")
-
-
-def resolve_sources(obj) -> Mapping[str, Any]:
-    """Given a configclass or configclass instance, loads configuration data and resolves them
-    according to the configclass' loaders and resolver.
+def resolve_sources(obj: Any) -> Mapping[str, Any]:
+    """Given a configclass or configclass instance, call each attached loader in sequence and
+    resolve the loaded data with "last-seen wins" priority. This function works by calling an
+    internal class method that is added by the configclass decorator.
     """
     try:
         return getattr(obj, RESOLVE_SOURCES_METHOD)()
@@ -137,7 +121,8 @@ def resolve_sources(obj) -> Mapping[str, Any]:
 
 def is_configclass(obj: Any) -> bool:
     """Returns `True` if its parameter is a configclass or an instance of a configclass, otherwise
-    returns `False`. This is determined by a simple
+    returns `False`. This is determined by a simple check for the internal class method to resolve
+    sources that is created by the configclass decorator.
 
     If you need to know if the input is an instance of a configclass (and not a configclass
     itself), then add a further check for not `isinstance(obj, type)`.
@@ -387,15 +372,6 @@ class ArgParseLoader:
         return vars(self.parser.parse_args())
 
 
-def last_seen_wins_merge_resolver(loaders: Sequence[Loader], data_class: type) -> Dict[str, Any]:
-    """Resolver function that merges configuration data from all sources that it receives. It
-    resolves duplicate keys with "last-seen wins" logic, similar to most dictionary operations."""
-    resolved = {}
-    for loader in loaders:
-        resolved.update(loader(data_class))
-    return resolved
-
-
 def configclass(
     *namespace: str,
     runtime_specified_path_hook: Optional[RuntimeSpecifiedPathHook] = None,
@@ -439,7 +415,4 @@ def configclass(
     ]
     if argument_parser:
         loaders.append(ArgParseLoader(argument_parser))
-    return custom_configclass(
-        loaders=loaders,
-        resolver=last_seen_wins_merge_resolver,
-    )
+    return custom_configclass(loaders=loaders)
