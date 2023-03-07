@@ -1,10 +1,11 @@
-import argparse
 import dataclasses
+import datetime
 from functools import wraps
 from itertools import chain
 import os
 from pathlib import Path
 import platform
+import typing
 from typing import (
     Any,
     Callable,
@@ -15,6 +16,7 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
+    TypeVar,
     Union,
     get_type_hints,
 )
@@ -25,12 +27,17 @@ except ModuleNotFoundError:
     import tomli as tomllib
 
 try:
+    from typing import Self  # type: ignore[attr-defined] # Python 3.11+
+except ImportError:
+    from typing_extensions import Self
+
+try:
     from typing import TypeAlias, TypeGuard  # type: ignore[attr-defined] # Python 3.10+
 except ImportError:
     from typing_extensions import TypeAlias, TypeGuard
 
 try:
-    from typing import get_origin  # Python 3.8+
+    from typing import get_origin  # type: ignore[attr-defined] # Python 3.8+
 except ImportError:
     from typing_extensions import get_origin
 
@@ -295,27 +302,65 @@ class TomlFileLoader:
         return {}
 
 
-def convert_to_type(val: str, type_: type) -> Any:
-    """Converts a string value to the specified type for the following primitive types and
-    built-in containers: int, float, complex, bytes, bool, list, tuple, dict. If the type is not
-    supported, the original value will be returned.
-    """
-    if type_ in {int, float, complex}:
-        return type_(val)
-    elif type_ is bytes:
-        return val.encode("utf-8")
-    elif type_ is bool:
-        if val.lower() == "true":
-            return True
-        elif val.lower() == "false":
-            return False
+_Type = TypeVar("_Type", bound=type)
+Deserializer: TypeAlias = Callable[[_Type, str], Union[_Type, str]]
+
+
+@dataclasses.dataclass
+class DispatchDeserializer:
+    registry: Dict[type, Deserializer] = dataclasses.field(default_factory=dict)
+
+    def copy(self) -> Self:
+        return type(self)(registry=self.registry.copy())
+
+    def register(self, *types: type) -> Callable[[Deserializer], Deserializer]:
+        def decorator(fn: Deserializer) -> Deserializer:
+            for type_ in types:
+                self.registry[type_] = fn
+            return fn
+
+        return decorator
+
+    def __call__(self, type_: _Type, val: str) -> Union[_Type, str]:
+        if type_ in self.registry:
+            return self.registry[type_](type_, val)
+        elif get_origin(type_) in self.registry:
+            origin = typing.cast(type, get_origin(type_))
+            return self.registry[origin](type_, val)
         else:
-            raise ValueError("Unable to convert bool value:", val)
-    elif type_ in {list, tuple, dict}:
-        return type_(tomllib.loads(f"val = {val}")["val"])
-    elif get_origin(type_) in {list, tuple, dict}:
-        return get_origin(type_)(tomllib.loads(f"val = {val}")["val"])  # type: ignore[misc]
-    return val
+            return val
+
+
+def create_default_deserializer():
+    return _default_deserializer.copy()
+
+
+_default_deserializer = DispatchDeserializer()
+
+
+@_default_deserializer.register(int, float, complex)
+def _cast(type_: _Type, val: str) -> _Type:
+    return type_(val)
+
+
+@_default_deserializer.register(bytes)
+def _encode_utf8(_, val: str) -> bytes:
+    return val.encode("utf-8")
+
+
+@_default_deserializer.register(bool)
+def _convert_bool(_, val: str) -> bool:
+    if val.lower() == "true":
+        return True
+    elif val.lower() == "false":
+        return False
+    else:
+        raise ValueError("Unable to convert bool value:", val)
+
+
+@_default_deserializer.register(list, tuple, dict, datetime.datetime, datetime.date)
+def _deserialize_toml_value(type_: _Type, val: str) -> _Type:
+    return type_(tomllib.loads(f"val = {val}")["val"])
 
 
 @dataclasses.dataclass
@@ -327,8 +372,10 @@ class EnvVarLoader:
     Arguments:
         namespace (Sequence[str]): Namespace to search for environment variables.
         convert_types (bool): Whether to convert loaded environment variable data to the annotated
-            types on the configclass. Requires that the data class uses dataclasses-style member
-            declaration with type annotations.
+            types on the configclass using the deserializer. Requires that the data class uses
+            dataclasses-style member declaration with type annotations.
+        deserializer (Deserializer): A callable that attempts to deserializes string values into
+            specified types. By default, this
         to_field_name_transform (Callable[[str], str]): A callable that transforms the environment
             variable name (after the namespace prefix has been removed) to its associated
             configclass variable name. Defaults to lowercasing.
@@ -336,6 +383,7 @@ class EnvVarLoader:
 
     namespace: Sequence[str]
     convert_types: bool = True
+    deserializer: Deserializer = dataclasses.field(default_factory=create_default_deserializer)
     to_field_name_transform: Callable[[str], str] = lambda s: s.lower()  # noqa: E731
 
     @property
@@ -357,25 +405,14 @@ class EnvVarLoader:
         for key, val in self.env_vars:
             field_name = self.to_field_name_transform(key[len(self.prefix) :])
             if field_name in field_type_hints:
-                val = convert_to_type(val, field_type_hints[field_name])
+                val = self.deserializer(field_type_hints[field_name], val)
             data[field_name] = val
         return data
-
-
-@dataclasses.dataclass
-class ArgParseLoader:
-    """Constructs a loader callable from a argparse.ArgumentParser instance."""
-
-    parser: argparse.ArgumentParser
-
-    def __call__(self, data_class: type) -> Dict[str, Any]:
-        return vars(self.parser.parse_args())
 
 
 def configclass(
     *namespace: str,
     runtime_specified_path_hook: Optional[RuntimeSpecifiedPathHook] = None,
-    argument_parser: Optional[argparse.ArgumentParser] = None,
 ) -> Callable[[type], type]:
     """Returns a decorator that adds functionality to a data class to load default values from
     certain sources. This is the out-of-the-box decorator factory that implements sane, default
@@ -386,23 +423,20 @@ def configclass(
     variables < runtime-specified arguments. The only required argument is at least one namespace
     string that will be used to identify relevant TOML file data and environment variables.
 
-    Optional arguments include a runtime hook that returns a file path to a TOML file, and an
-    argparse parser instance that will be used as another data source. If further customization is
-    needed, see [custom_configclass][minimal_configclasses.custom_configclass].
+    A runtime hook that returns a file path to a TOML file can be provided as an optional argument.
+    If further customization is needed, see
+    [custom_configclass][minimal_configclasses.custom_configclass].
 
     The decorated class must use dataclasses-like initialization semantics, meaning that it has an
     __init__ signature that can accept its attributes as keyword arguments.
 
     Arguments:
-        *namespace (str): Namespace identifier. If more than one, this is treated as the identifier
-            path for a nested namespace.
+        *namespace (str): Namespace identifier. A nested namespace should be specified with its
+            parts as separate string arguments.
         runtime_specified_path_hook (Optional[RuntimeSpecifiedPathHook]): Optional callable hook
             that allows a runtime-specified path to be passed checked by the TomlFileLoader. This
             can be used for the case that your program allows users to specify a path to a
             configuration file. Defaults to None.
-        argument_parser (Optional[argparse.ArgumentParser]): Optional ArgumentParser instance. If
-            provided, will append an ArgParseLoader to the loaders as the data source with highest
-            priority. Defaults to None.
     """
     if len(namespace) < 1 or isinstance(namespace[0], type):
         raise ValueError(
@@ -413,6 +447,4 @@ def configclass(
         TomlFileLoader(namespace, runtime_specified_path_hook=runtime_specified_path_hook),
         EnvVarLoader(namespace),
     ]
-    if argument_parser:
-        loaders.append(ArgParseLoader(argument_parser))
     return custom_configclass(loaders=loaders)
