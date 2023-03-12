@@ -344,7 +344,7 @@ class EnvVarLoader:
             types on the configclass using the deserializer. Requires that the data class uses
             dataclasses-style member declaration with type annotations.
         deserializer (Deserializer): A callable that attempts to deserializes string values into
-            specified types. By default, this
+            specified types. By default, is a TOML deserializer.
         to_field_name_transform (Callable[[str], str]): A callable that transforms the environment
             variable name (after the namespace prefix has been removed) to its associated
             configclass variable name. Defaults to lowercasing.
