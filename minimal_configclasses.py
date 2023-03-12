@@ -2,6 +2,7 @@ import dataclasses
 import datetime
 from functools import wraps
 from itertools import chain
+import logging
 import os
 from pathlib import Path
 import platform
@@ -42,6 +43,9 @@ except ImportError:
     from typing_extensions import get_origin
 
 
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
+
 Loader: TypeAlias = Callable[[type], Mapping[str, Any]]
 """Type alias for loader callables. A valid loader returns a Mapping (e.g., dictionary or
 dictionary-like object) containing configuration data. It takes the configclass data class as an
@@ -60,7 +64,11 @@ def _resolve_sources_method(cls) -> Mapping[str, Any]:
     loaders = getattr(cls, LOADERS_ATTR)
     resolved = {}
     for loader in loaders:
-        resolved.update(loader(cls))
+        loader_name = getattr(loader, "__name__", type(loader).__name__)
+        logger.info("Calling loader %s ...", loader_name)
+        data = loader(cls)
+        logger.debug("Loader %s returned data %s", loader_name, data)
+        resolved.update(data)
     return resolved
 
 
@@ -122,8 +130,11 @@ def resolve_sources(obj: Any) -> Mapping[str, Any]:
     """
     try:
         return getattr(obj, RESOLVE_SOURCES_METHOD)()
-    except AttributeError:
-        raise TypeError("Must be called with configclass type or instance.")
+    except AttributeError as e:
+        if RESOLVE_SOURCES_METHOD in str(e):
+            raise TypeError("Must be called with configclass type or instance.")
+        else:
+            raise
 
 
 def is_configclass(obj: Any) -> bool:
@@ -283,6 +294,7 @@ class TomlFileLoader:
                 yield Path.home() / file_name
 
     def __call__(self, data_class: type) -> Dict[str, Mapping]:
+        logger.debug("%s", self)
         for path in self.paths_to_check:
             try:
                 if path.name == "pyproject.toml":
@@ -290,14 +302,19 @@ class TomlFileLoader:
                 else:
                     namespace = namespace[1:]
                 data = load_toml(path, namespace)
+                logger.info(
+                    "Loaded TOML config data from %s with keys %s", path, tuple(data.keys())
+                )
                 if self.convert_hyphens:
                     data = {key.replace("-", "_"): value for key, value in data.items()}
                 return data
             except KeyError:
                 # This is fine because configuration is optional, check next one
+                logger.debug("File %s does not contain namespace %s", path, namespace)
                 pass
             except FileNotFoundError:
                 # This is fine because configuration is optional, check next one
+                logger.debug("No file found at %s", path)
                 pass
         return {}
 
@@ -397,12 +414,14 @@ class EnvVarLoader:
                 yield key, val
 
     def __call__(self, data_class: type) -> Dict[str, Any]:
+        logger.debug("%s", self)
         if self.convert_types:
             field_type_hints = get_type_hints(data_class)
         else:
             field_type_hints = {}
         data = {}
         for key, val in self.env_vars:
+            logger.info("Loading environment variable %s=%s", key, val)
             field_name = self.to_field_name_transform(key[len(self.prefix) :])
             if field_name in field_type_hints:
                 val = self.deserializer(field_type_hints[field_name], val)
