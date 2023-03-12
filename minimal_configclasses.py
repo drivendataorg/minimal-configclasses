@@ -323,61 +323,13 @@ _Type = TypeVar("_Type", bound=type)
 Deserializer: TypeAlias = Callable[[_Type, str], Union[_Type, str]]
 
 
-@dataclasses.dataclass
-class DispatchDeserializer:
-    registry: Dict[type, Deserializer] = dataclasses.field(default_factory=dict)
-
-    def copy(self) -> Self:
-        return type(self)(registry=self.registry.copy())
-
-    def register(self, *types: type) -> Callable[[Deserializer], Deserializer]:
-        def decorator(fn: Deserializer) -> Deserializer:
-            for type_ in types:
-                self.registry[type_] = fn
-            return fn
-
-        return decorator
-
-    def __call__(self, type_: _Type, val: str) -> Union[_Type, str]:
-        if type_ in self.registry:
-            return self.registry[type_](type_, val)
-        elif get_origin(type_) in self.registry:
-            origin = typing.cast(type, get_origin(type_))
-            return self.registry[origin](type_, val)
-        else:
-            return val
-
-
-def create_default_deserializer():
-    return _default_deserializer.copy()
-
-
-_default_deserializer = DispatchDeserializer()
-
-
-@_default_deserializer.register(int, float, complex)
-def _cast(type_: _Type, val: str) -> _Type:
-    return type_(val)
-
-
-@_default_deserializer.register(bytes)
-def _encode_utf8(_, val: str) -> bytes:
-    return val.encode("utf-8")
-
-
-@_default_deserializer.register(bool)
-def _convert_bool(_, val: str) -> bool:
-    if val.lower() == "true":
-        return True
-    elif val.lower() == "false":
-        return False
+def deserialize_toml_value(type_: _Type, val: str) -> Union[_Type, str]:
+    if type_ in {int, float, bool, list, tuple, dict, datetime.datetime, datetime.date}:
+        return type_(tomllib.loads(f"val = {val}")["val"])
+    elif get_origin(type_) in {list, tuple, dict}:
+        return get_origin(type_)(tomllib.loads(f"val = {val}")["val"])
     else:
-        raise ValueError("Unable to convert bool value:", val)
-
-
-@_default_deserializer.register(list, tuple, dict, datetime.datetime, datetime.date)
-def _deserialize_toml_value(type_: _Type, val: str) -> _Type:
-    return type_(tomllib.loads(f"val = {val}")["val"])
+        return val
 
 
 @dataclasses.dataclass
@@ -400,7 +352,7 @@ class EnvVarLoader:
 
     namespace: Sequence[str]
     convert_types: bool = True
-    deserializer: Deserializer = dataclasses.field(default_factory=create_default_deserializer)
+    deserializer: Deserializer = deserialize_toml_value
     to_field_name_transform: Callable[[str], str] = lambda s: s.lower()  # noqa: E731
 
     @property
