@@ -327,7 +327,7 @@ def deserialize_toml_value(type_: _Type, val: str) -> Union[_Type, str]:
     if type_ in {int, float, bool, list, tuple, dict, datetime.datetime, datetime.date}:
         return type_(tomllib.loads(f"val = {val}")["val"])
     elif get_origin(type_) in {list, tuple, dict}:
-        return get_origin(type_)(tomllib.loads(f"val = {val}")["val"])
+        return get_origin(type_)(tomllib.loads(f"val = {val}")["val"])  # type: ignore[misc]
     else:
         return val
 
