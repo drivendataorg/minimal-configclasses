@@ -241,8 +241,8 @@ class TomlFileLoader:
     runtime_specified_path_hook: Optional[RuntimeSpecifiedPathHook] = None
     check_pyproject_toml: bool = True
     named_file_templates: Sequence[str] = ("{}.toml", ".{}.toml")
-    search_ancestor_dirs = True
-    stop_on_repo_root = True
+    search_ancestor_dirs: bool = True
+    stop_on_repo_root: bool = True
     check_xdg_config_home_dir: bool = True
     check_macos_application_support_dir: bool = True
     check_windows_appdata_dir: bool = True
@@ -253,7 +253,7 @@ class TomlFileLoader:
             raise ValueError("namespace sequence must contain at least one part.")
 
     @property
-    def file_names(self) -> Iterator[str]:
+    def named_files(self) -> Iterator[str]:
         for template in self.named_file_templates:
             yield template.format(self.namespace[0])
 
@@ -269,7 +269,7 @@ class TomlFileLoader:
         for dir in dirs_to_search:
             if self.check_pyproject_toml:
                 yield dir / "pyproject.toml"
-            for file_name in self.file_names:
+            for file_name in self.named_files:
                 yield dir / file_name
             if self.stop_on_repo_root and any(
                 (dir / repo).exists() for repo in (".git", ".hg", ".svn")
@@ -278,19 +278,19 @@ class TomlFileLoader:
 
         if self.check_xdg_config_home_dir:
             xdg_config_home_dir = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-            for file_name in self.file_names:
+            for file_name in self.named_files:
                 yield xdg_config_home_dir / file_name
         if self.check_macos_application_support_dir and platform.system() == "Darwin":
-            for file_name in self.file_names:
+            for file_name in self.named_files:
                 yield Path.home() / "Library" / "Application Support" / file_name
         if self.check_windows_appdata_dir and platform.system() == "Windows":
             windows_appdata_dir = Path(
                 os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")
             )
-            for file_name in self.file_names:
+            for file_name in self.named_files:
                 yield windows_appdata_dir / file_name
         if self.check_home_dir:
-            for file_name in self.file_names:
+            for file_name in self.named_files:
                 yield Path.home() / file_name
 
     def __call__(self, data_class: type) -> Dict[str, Mapping]:
